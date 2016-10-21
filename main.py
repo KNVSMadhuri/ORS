@@ -1,25 +1,26 @@
-from datetime import datetime, timedelta
 import json
 import logging
 from datetime import datetime
 import webapp2
-from models import CampaignData, OfferData, MemberData, MemberOfferData, ndb
-from getOfferXml import get_xml
-import httplib
-import sendEmail
-import xml.etree.ElementTree as ET
+from models import CampaignData, MemberData, MemberOfferData, FrontEndData, ndb
+from datastore import CampaignDataService, MemberOfferDataService
+from telluride_service import TellurideService
+from random import randrange
+from sendEmail import send_mail
 
 
+class BaseHandler(webapp2.RequestHandler):
+    def handle_exception(self, exception, debug):
+        self.response.write('An error occurred.')
+        logging.exception(self, exception, debug)
 
-DEFAULT_CAMPAIGN_NAME = 'default_campaign'
-ACCESS_TOKEN = '038f658bb152e08ce0f2148fffac2a75244178608ac9c273a10c1950b230fd47'
+        if isinstance(exception, webapp2.HTTPException):
+            self.response.set_status(exception.code)
+        else:
+            self.response.set_status(500)
 
 
-def get_campaign_key(campaign_name=DEFAULT_CAMPAIGN_NAME):
-    return ndb.Key('CampaignData', campaign_name)
-
-
-class IndexPageHandler(webapp2.RequestHandler):
+class IndexPageHandler(BaseHandler):
     def get(self):
         self.response.write("CAMPAIGN-BACKEND-SERVICE")
 
@@ -34,23 +35,38 @@ class SaveCampaignHandler(webapp2.RequestHandler):
         is_entity = ndb.Key('CampaignData', campaign_name).get()
         logging.info('is_entity: %s', is_entity)
         logging.info('type is_entity: %s', type(is_entity))
-        self.response.headers['Access-Control-Allow-Origin'] = '*'
+
         # Check for create new entity or update an existing entity
         if is_entity is None:
-            save_campaign(json_data, datetime.now())
+            offer_list = CampaignDataService.save_campaign(json_data, datetime.now())
         else:
-            save_campaign(json_data, is_entity.created_at)
-        # self.response.headers['Content-Type'] = 'application/json'
+            offer_list = CampaignDataService.save_campaign(json_data, is_entity.created_at)
+
+        for each_offer in offer_list:
+            TellurideService.create_offer(each_offer)
+
+        logging.info("Total offers created:: %d'" % len(offer_list))
+        member_emails = ''
+        for each_member_entity in MemberData.query().fetch():
+            random_index = randrange(0, len(offer_list))
+            logging.info("Random index selected:: %d'" % random_index)
+            offer_entity_selected = offer_list[random_index]
+
+            send_mail(member_entity=each_member_entity, offer_entity=offer_entity_selected)
+            member_offer_data_key = MemberOfferDataService.create(offer_entity_selected, each_member_entity)
+
+            logging.info('member_offer_key:: %s', member_offer_data_key)
+            logging.info('Offer %s email has been sent to: : %s', offer_entity_selected, each_member_entity.email)
+            if each_member_entity.email not in member_emails:
+                member_emails = member_emails + each_member_entity.email + ' '
+
         self.response.headers['Access-Control-Allow-Origin'] = '*'
-        # self.response.write({'message': 'Campaign created successfullly!!!'})
 
 
 class GetAllCampaignsHandler(webapp2.RequestHandler):
     def get(self):
-        query = CampaignData.query()
+        query = CampaignData.query().order(-CampaignData.created_at)
         entity_list = query.fetch(100)
-        # logging.info(entity_list)
-        # logging.info(query)
         result = list()
         logging.info('len of the list: %s', len(entity_list))
         for each in entity_list:
@@ -64,6 +80,7 @@ class GetAllCampaignsHandler(webapp2.RequestHandler):
             campaign_dict['category'] = each_entity.category
             campaign_dict['conversion_ratio'] = each_entity.conversion_ratio
             campaign_dict['period'] = each_entity.period
+            campaign_dict['created_at'] = str(each_entity.created_at)
 
             offer_dict['offer_id'] = each_entity.key.id()
             offer_dict['offer_type'] = each_entity.offer_type
@@ -78,66 +95,6 @@ class GetAllCampaignsHandler(webapp2.RequestHandler):
         self.response.headers['Content-Type'] = 'application/json'
         self.response.headers['Access-Control-Allow-Origin'] = '*'
         self.response.write(json.dumps({'data': result}))
-
-
-def save_campaign(json_data, created_time):
-    campaign_dict = json_data['campaign_details']
-    offer_dict = json_data['offer_details']
-
-    campaign_name = campaign_dict['name']
-    campaign_money = int(campaign_dict['money'])
-    campaign_category = campaign_dict['category']
-    campaign_convratio = int(campaign_dict['conversion_ratio'])
-    campaign_period = campaign_dict['period']
-
-    offer_type = offer_dict['offer_type']
-    offer_min_val = int(offer_dict['min_value'])
-    offer_max_val = int(offer_dict['max_value'])
-    offer_valid_till = offer_dict['valid_till']
-    offer_mbr_issuance = offer_dict['member_issuance']
-
-    campaign = CampaignData(name=campaign_name, money=campaign_money, category=campaign_category,
-                            conversion_ratio=campaign_convratio, period=campaign_period,
-                            offer_type=offer_type, max_per_member_issuance_frequency=offer_mbr_issuance, max_value=offer_max_val,
-                            min_value=offer_min_val, valid_till=offer_valid_till)
-
-    campaign.key = get_campaign_key(campaign_name)
-    campaign_key = campaign.put()
-    logging.info('campaign_key:: %s', campaign_key)
-
-    start_date = datetime.now().strftime("%Y-%m-%d")
-    end_date = datetime.strptime(start_date, "%Y-%m-%d") + timedelta(days=6)
-    end_date = end_date.strftime("%Y-%m-%d")
-    offer = OfferData(surprise_points=10, threshold=10, OfferNumber=campaign_name+"_OFFER",
-                      OfferPointsDollarName="test 101", OfferDescription="test 101",
-                      OfferType="Xtreme Redeem", OfferSubType="Items", OfferStartDate=start_date,
-                      OfferStartTime="00:00:00", OfferEndDate=end_date, OfferEndTime="23:59:00",
-                      OfferBUProgram_BUProgram_BUProgramName="BU - Apparel",
-                      OfferBUProgram_BUProgram_BUProgramCost=0.00, ReceiptDescription="TELL-16289",
-                      OfferCategory="Stackable", OfferAttributes_OfferAttribute_Name="MULTI_TRAN_IND",
-                      OfferAttributes_OfferAttribute_Values_Value="N", Rules_Rule_Entity="Location",
-                      Rules_Conditions_Condition_Name="STORE_LOCATION",
-                      Rules_Conditions_Condition_Operator="EQUALS",
-                      Rules_Conditions_Condition_Values_Value="OrderLocation",
-                      RuleActions_ActionID="ACTION-1", Actions_ActionID="ACTION-1",
-                      Actions_ActionName="EARN",
-                      Actions_ActionProperty_PropertyType="Tier",
-                      Actions_ActionProperty_Property_Name="MIN",
-                      Actions_ActionProperty_Property_Values_Value="1",
-                      created_at=created_time)
-    offer.key = ndb.Key('OfferData', campaign_name+"_OFFER")
-    offer.campaign = campaign.key
-    offer_key = offer.put()
-
-    sendEmail.offer_email(campaign_name)
-
-    # for member in MemberData.query().fetch():
-    #     member_offer_data = MemberOfferData(offer=offer.key, member=member.key)
-    #     member_offer_data.key = ndb.key('MemberOfferData')
-    #     member_offer_data.status = "PENDING"
-    #     member_offer_data.put()
-
-    logging.info('offer_key:: %s', offer_key)
 
 
 class GetAllMembersHandler(webapp2.RequestHandler):
@@ -155,74 +112,89 @@ class GetAllMembersHandler(webapp2.RequestHandler):
 class ActivateOfferHandler(webapp2.RequestHandler):
     def get(self):
         offer_id = self.request.get('offer_id')
+        logging.info("Request offer_id: " + offer_id)
+        if offer_id is None or not offer_id:
+            response_html = "<html><head><title>Sears Offer Activation</title></head><body><h3> " \
+                             + "Please provide offer_id and member_id with the request</h3></body></html>"
+            self.response.write(response_html)
+            return
+
         member_id = self.request.get('member_id')
-        offer = ndb.Key('OfferData', offer_id).get()
-        member = ndb.Key('MemberData', member_id).get()
-        # self.response.headers['Content-Type'] = 'application/json'
+        logging.info("Request member_id: " + member_id)
+
+        if member_id is None or not member_id:
+            response_html = "<html><head><title>Sears Offer Activation</title></head><body><h3> " \
+                             + "Please provide offer_id and member_id with the request</h3></body></html>"
+            self.response.write(response_html)
+            return
+
+        offer_key = ndb.Key('OfferData', offer_id)
+        member_key = ndb.Key('MemberData', member_id)
         self.response.headers['Access-Control-Allow-Origin'] = '*'
+        logging.info("fetched offer_key and member key ")
         response_dict = dict()
-        if offer is not None:
-            post_data = get_xml(offer).rstrip('\n')
-            logging.info(post_data)
+        offer = offer_key.get()
+        member = member_key.get()
+        if offer is not None and member is not None:
+            logging.info("offer is not None")
 
-            result = ActivateOfferHandler.create_offer(post_data)
-
-            doc = ET.fromstring(result)
-            status_code = doc.find('.//{http://rewards.sears.com/schemas/}Status').text
-            if int(status_code) == 0:
-                # Assuming one-to-one mapping with Member and Offer entities
-                member_offer_obj = MemberOfferData.query(MemberOfferData.member == member.key,
-                                                         MemberOfferData.offer == offer.key).get()
-                member_offer_obj.status = True
-                member_offer_obj.put()
-
-                logging.info("Activated offer " + offer.key.id() + " for member " + member.email)
-                response_dict['data'] = str(result)
-                response_dict['message'] = "Offer has been activated successfully"
+            status_code = TellurideService.register_member(offer, member)
+            logging.info("Status code:: %d" % status_code)
+            if status_code == 0:
+                member_offer_obj = MemberOfferData.query(MemberOfferData.member == member_key,
+                                                         MemberOfferData.offer == offer_key).get()
+                if member_offer_obj is not None:
+                    member_offer_obj.status = True
+                    member_offer_obj.put()
+                    response_dict['message'] = "Offer has been activated successfully"
+                else:
+                    logging.error("Telluride call failed.")
+                    response_dict['message'] = "Sorry, Offer could not be activated"
+            elif status_code == 1 or status_code == 99:
+                response_dict['message'] = "Member already registered for this offer"
             else:
-                response_dict['data'] = str(result)
-                response_dict['message'] = "Offer activation has failed!!!"
+                logging.error("Member Offer Object not found for offer key :: %s and member key:: %s",
+                              offer_key, member_key)
+
+                logging.info("Activated offer %s for member %s", str(offer_key), str(member_key))
+                # response_dict['data'] = str(result)
+                response_dict['message'] = "Sorry, Offer could not be activated."
         else:
+            logging.error("could not fetch offer or member details for key:: %s", offer_key)
             response_dict['message'] = "Sorry could not fetch offer details."
         response_html = "<html><head><title>Sears Offer Activation</title></head><body><h3> " \
                         + response_dict['message'] + "</h3></body></html>"
         self.response.write(response_html)
 
-    @classmethod
-    def create_offer(cls, data):
-        logging.info('**** data: %s', data)
-        url = 'esbqa-1080.searshc.com'
-        access_token = ACCESS_TOKEN
-        # headers = {'client_id': 'OFFER_REC_SYS_QA', 'access_token': access_token,
-        # 'content-type': 'application/xml'}
 
-        logging.info('****url: %s', url)
-
-        webservice = httplib.HTTPS(url)
-        webservice.putrequest("POST", "/rest/tellurideAS/Offer")
-        webservice.putheader("client_id", "OFFER_REC_SYS_QA")
-        webservice.putheader("access_token", access_token)
-        webservice.putheader("Content-type", "application/xml")
-        webservice.endheaders()
-        webservice.send(data)
-
-        # get the response
-        status_code, status_message, header = webservice.getreply()
-        result = webservice.getfile().read()
-        logging.info('Response status_code: %s', status_code)
-        logging.info('Response status_message: %s', status_message)
-        logging.info('Response header: %s', header)
-        logging.info('Response result: %s', result)
-
-        return result
-
-
-class EmailOfferMembersHandler(webapp2.RequestHandler):
+class EmailOfferMembersHandler(BaseHandler):
     def get(self):
-        campaign_id = self.request.get('campaign_id')
+        member_entity = ndb.Key('MemberData', self.request.get('member_id')).get()
+        offer_entity = ndb.Key('OfferData', self.request.get('offer_id')).get()
+        if member_entity is None or offer_entity is None:
+            response_dict = {'status': 'Failure', 'message': "Details not found for the request"}
+        else:
+            send_mail(member_entity=member_entity, offer_entity=offer_entity)
+            member_offer_data_key = MemberOfferDataService.create(offer_entity=offer_entity, member_entity=member_entity)
+            logging.info('member_offer_key:: %s', member_offer_data_key)
+            logging.info('Offer %s email has been sent to: : %s', offer_entity, member_entity.email)
+            response_dict = {'status': 'Success', 'message': "Offer email has been sent successfully!!!"}
+        self.response.headers['Access-Control-Allow-Origin'] = '*'
+        self.response.headers['Content-type'] = 'application/json'
+        self.response.write(json.dumps(response_dict))
 
-        obj = sendEmail.offer_email(campaign_id)
-        self.response.out.write(json.dumps(obj))
+
+class UIListItemsHandler(webapp2.RequestHandler):
+    def get(self):
+        key = ndb.Key('FrontEndData', '1')
+        result = key.get()
+        result_dict = dict()
+        result_dict['categories'] = list(result.Categories)
+        result_dict['offer_type'] = list(result.Offer_Type)
+        result_dict['conversion_ratio'] = list(result.Conversion_Ratio)
+        self.response.headers['Content-Type'] = 'application/json'
+        self.response.headers['Access-Control-Allow-Origin'] = '*'
+        self.response.write(json.dumps({'data': result_dict}))
 
 
 # [START app]
@@ -232,7 +204,8 @@ app = webapp2.WSGIApplication([
     ('/campaigns', GetAllCampaignsHandler),
     ('/members', GetAllMembersHandler),
     ('/activateOffer', ActivateOfferHandler),
-    ('/emailMembers', EmailOfferMembersHandler)
+    ('/emailMembers', EmailOfferMembersHandler),
+    ('/getListItems', UIListItemsHandler)
 ], debug=True)
 
 # [END app]

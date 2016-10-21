@@ -1,41 +1,8 @@
 from sendgrid import sendgrid
 from sendgrid.helpers import mail
 import Utilities
-import webapp2
-import sys
-import httplib
 import logging
-import json, xml.etree.ElementTree as ET
-from google.appengine.ext import ndb
-from models import CampaignData, OfferData, MemberData, MemberOfferData, ndb
-
-
-def offer_email(campaign_id):
-    campaign_key = ndb.Key('CampaignData', campaign_id)
-    member_emails = ''
-    fetch_offers = OfferData.query(OfferData.campaign == campaign_key)
-    is_entity = fetch_offers.get()
-
-    if is_entity is None:
-        logging.info('Could not fetch required offers for the campaign: %s', campaign_id)
-        obj = {'status': 'Failure', 'message': 'Could not fetch required offers for the campaign'}
-        return obj
-    else:
-        logging.info('Fetched offers for the campaign: %s', campaign_id)
-        members = MemberData.query()
-        for offer_entity in fetch_offers.iter():
-            for member_entity in members.iter():
-                send_mail(member_entity, offer_entity)
-                member_offer_data = MemberOfferData(offer=offer_entity.key, member=member_entity.key, status=False)
-                member_offer_data_key = member_offer_data.put()
-                logging.info('member_offer_key:: %s', member_offer_data_key)
-                if member_entity.email not in member_emails:
-                    member_emails = member_emails + member_entity.email + ' '
-
-        logging.info('Offer emails have been sent to: : %s',member_emails)
-        obj = {'status': 'Success',
-        'message': 'Offer emails have been sent to: ' + member_emails}
-        return obj
+import os
 
 
 def send_mail(member_entity, offer_entity):
@@ -51,11 +18,24 @@ def send_mail(member_entity, offer_entity):
     offer_dict['offer_id'] = offer_entity.OfferNumber
 
     response = send_template_message(member_dict, offer_dict)
+
+    response = send_template_message(member_dict, offer_dict)
+    # logging.info("Sendgrid response for member %s Response_Status_Code:: %s, Response_Headers:: %s,  "
+    #              "Response_Body:: %s" % (member_entity.email, response.status_code, response.headers, response.body))
+
+    if response.status_code == 202:
+        logging.info("***Response_Status_code:: %d" % response.status_code)
+        logging.info("Mail has been sent successfully to %s" % member_entity.email)
+    else:
+        logging.info("Sendgrid response for member %s Response_Status_Code:: %s, Response_Headers:: %s,  Response_Body"
+                     ":: %s" % (member_entity.email, response.status_code, response.headers, response.body))
+        logging.error("Mail to %s has failed from sendgrid" % member_entity.email)
+
     return response
 
 
 def send_template_message(member_dict, offer_dict):
-    config_dict = Utilities.get_configuration()
+    config_dict = Utilities.get_sendgrid_configuration()
 
     sg = sendgrid.SendGridAPIClient(apikey=config_dict['SENDGRID_API_KEY'])
     to_email = mail.Email(member_dict['email'].encode("utf-8"))
@@ -67,6 +47,9 @@ def send_template_message(member_dict, offer_dict):
     message.set_from(from_email)
     personalization = mail.Personalization()
     personalization.add_to(to_email)
+    # https://syw-offers-services-qa-dot-syw-offers.appspot.com/
+    activation_url = "https://" + os.environ['CURRENT_VERSION_ID'].split('.')[0] + "-dot-syw-offers.appspot.com/" \
+                     "activateOffer?offer_id=" + offer_dict['offer_id'].encode("utf-8") + "&&member_id=" + member_dict['memberid'].encode("utf-8")
 
     substitution = mail.Substitution(key="%name%", value=member_dict['name'].encode("utf-8"))
     personalization.add_substitution(substitution)
@@ -80,10 +63,12 @@ def send_template_message(member_dict, offer_dict):
     personalization.add_substitution(substitution)
     substitution = mail.Substitution(key="%dollarthresholdvalue%", value='25')
     personalization.add_substitution(substitution)
+    substitution = mail.Substitution(key="%activationurl%", value=activation_url.encode("utf-8"))
+    personalization.add_substitution(substitution)
     message.add_personalization(personalization)
     message.set_template_id(config_dict['TEMPLATE_ID'])
-
-    logging.info('message.get(): %s',message.get())
+    logging.info("Activation URL::" + activation_url)
+    logging.info('message.get(): %s', message.get())
 
     response = sg.client.mail.send.post(request_body=message.get())
 

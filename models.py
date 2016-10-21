@@ -1,11 +1,5 @@
-import sys
-sys.path.insert(1, 'C:\Users\Madhuri\AppData\Local\Google\Cloud SDK\google-cloud-sdk\platform\google_appengine')
-sys.path.insert(1, 'C:\Users\Madhuri\AppData\Local\Google\Cloud SDK\google-cloud-sdk\platform\google_appengine\lib\yaml\lib')
-sys.path.insert(1, 'C:\Users\Madhuri\AppData\Local\Google\Cloud SDK\google-cloud-sdk\platform\google_appengine\lib')
-
-if 'google' in sys.modules:
-    del sys.modules['google']
 from google.appengine.ext import ndb
+
 
 class CampaignData(ndb.Model):
     name = ndb.StringProperty(indexed=True)
@@ -18,6 +12,7 @@ class CampaignData(ndb.Model):
     max_value = ndb.IntegerProperty(indexed=False)
     min_value = ndb.IntegerProperty(indexed=False)
     valid_till = ndb.StringProperty(indexed=False)
+    start_date = ndb.StringProperty(indexed=False)
     created_at = ndb.DateTimeProperty(auto_now_add=True, indexed=True)
     updated_at = ndb.DateTimeProperty(auto_now=True, auto_now_add=False)
 
@@ -72,3 +67,36 @@ class MemberOfferData(ndb.Model):
     status = ndb.BooleanProperty(default=False)
     created_at = ndb.DateTimeProperty(auto_now_add=True, indexed=True)
     updated_at = ndb.DateTimeProperty(auto_now=True, auto_now_add=False)
+
+
+class SendgridData(ndb.Model):
+    SENDGRID_API_KEY = ndb.StringProperty(indexed=True)
+    SENDGRID_SENDER = ndb.StringProperty(indexed=True)
+    TEMPLATE_ID = ndb.StringProperty(indexed=False)
+
+
+class ConfigData(ndb.Model):
+    SENDGRID_API_KEY = ndb.StringProperty(indexed=True)
+    SENDGRID_SENDER = ndb.StringProperty(indexed=True)
+    TEMPLATE_ID = ndb.StringProperty(indexed=False)
+
+    GENERATE_TOKEN_HOST = ndb.StringProperty(indexed=False)
+    GENERATE_TOKEN_URL = ndb.StringProperty(indexed=False)
+
+    TELLURIDE_CLIENT_ID = ndb.StringProperty(indexed=False)
+
+    CREATE_OFFER_URL = ndb.StringProperty(indexed=False)
+    CREATE_OFFER_REQUEST = ndb.StringProperty(indexed=False)
+
+    ACTIVATE_OFFER_URL = ndb.StringProperty(indexed=False)
+    ACTIVATE_OFFER_REQUEST = ndb.StringProperty(indexed=False)
+    ACTIVATE_OFFER_PORT = ndb.StringProperty(indexed=False)
+
+    REGISTER_OFFER_URL = ndb.StringProperty(indexed=False)
+    REGISTER_OFFER_REQUEST = ndb.StringProperty(indexed=False)
+
+
+class FrontEndData(ndb.Model):
+    Categories = ndb.StringProperty(indexed=True, repeated=True)
+    Conversion_Ratio = ndb.IntegerProperty(indexed=True, repeated=True)
+    Offer_Type = ndb.StringProperty(indexed=False, repeated=True)

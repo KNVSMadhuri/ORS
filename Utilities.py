@@ -1,19 +1,35 @@
-import yaml
-import os
-import sys
+from models import ndb
 
 
-# Function to read configurations
-def get_configuration():
-    dataMap = {}
-    try:
-        with open(os.path.join(os.path.dirname(__file__), 'config.yaml'), 'r') as stream:
-            try:
-                dataMap = yaml.safe_load(stream)
+# Function to read sendgrid configurations
+def get_sendgrid_configuration():
+    data_map = dict()
+    data_key = ndb.Key('ConfigData', 'SendGridConfig')
+    data_entity = data_key.get()
+    data_map['SENDGRID_API_KEY'] = data_entity.SENDGRID_API_KEY
+    data_map['SENDGRID_SENDER'] = data_entity.SENDGRID_SENDER
+    data_map['TEMPLATE_ID'] = data_entity.TEMPLATE_ID
 
-            except yaml.YAMLError as exc:
-                print 'YAML error'
-    except IOError:
-        print 'IO error'
+    return data_map
 
-    return dataMap
+
+# Function to read url configurations
+def get_url_configuration():
+    data_map = dict()
+    data_key = ndb.Key('ConfigData', 'URLConfig')
+    data_entity = data_key.get()
+    data_map['GENERATE_TOKEN_HOST'] = data_entity.GENERATE_TOKEN_HOST
+    data_map['GENERATE_TOKEN_URL'] = data_entity.GENERATE_TOKEN_URL
+    data_map['TELLURIDE_CLIENT_ID'] = data_entity.TELLURIDE_CLIENT_ID
+
+    data_map['CREATE_OFFER_URL'] = data_entity.CREATE_OFFER_URL
+    data_map['CREATE_OFFER_REQUEST'] = data_entity.CREATE_OFFER_REQUEST
+
+    data_map['ACTIVATE_OFFER_URL'] = data_entity.ACTIVATE_OFFER_URL
+    data_map['ACTIVATE_OFFER_REQUEST'] = data_entity.ACTIVATE_OFFER_REQUEST
+    data_map['ACTIVATE_OFFER_PORT'] = data_entity.ACTIVATE_OFFER_PORT
+
+    data_map['REGISTER_OFFER_URL'] = data_entity.REGISTER_OFFER_URL
+    data_map['REGISTER_OFFER_REQUEST'] = data_entity.REGISTER_OFFER_REQUEST
+
+    return data_map
